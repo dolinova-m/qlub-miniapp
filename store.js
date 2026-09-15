@@ -69,3 +69,15 @@ export async function loadSubscriptions() {
 export function saveSubscription(sub) {
   return setItem('sub_' + sub.id, JSON.stringify(sub));
 }
+
+// Events attended without a subscription. Newest first.
+export async function loadEvents() {
+  return (await getByPrefix('ev_'))
+    .map(parse)
+    .filter(Boolean)
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+}
+
+export function saveEvent(event) {
+  return setItem('ev_' + event.id, JSON.stringify(event));
+}

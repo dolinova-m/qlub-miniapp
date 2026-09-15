@@ -1,14 +1,18 @@
-import { DIRECTIONS, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT } from './catalog.js?v=1';
-import * as store from './store.js?v=1';
+import { DIRECTIONS, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT } from './catalog.js?v=2';
+import { today, addDays, short, full } from './dates.js?v=2';
+import { clubStatus } from './status.js?v=2';
+import * as store from './store.js?v=2';
 
-const VERSION = 1;
+const VERSION = 2;
 const tg = window.Telegram?.WebApp;
 const supports = (version) => !!tg?.isVersionAtLeast?.(version);
 const app = document.getElementById('app');
 
 let profile = null;
 let subs = [];
+let events = [];
 let justChecked = null; // { id, index } — the cell to animate on the next render
+let flash = null; // one-time note in the status block after marking an event
 let actions = {};
 
 // ---------- helpers ----------
@@ -16,8 +20,10 @@ let actions = {};
 const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const rub = (n) => `${n.toLocaleString('ru-RU')} ₽`;
-const lessons = (n) => `${n} ${plural(n, 'занятие', 'занятия', 'занятий')}`;
-const days = (n) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
+const lessonsWord = (n) => `${n} ${plural(n, 'занятие', 'занятия', 'занятий')}`;
+const eventsWord = (n) => `${n} ${plural(n, 'мероприятие', 'мероприятия', 'мероприятий')}`;
+const subsWord = (n) => `${n} ${plural(n, 'абонемент', 'абонемента', 'абонементов')}`;
+const daysWord = (n) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
 
 function plural(n, one, few, many) {
   const m10 = n % 10;
@@ -27,24 +33,6 @@ function plural(n, one, few, many) {
   return many;
 }
 
-// Dates are 'YYYY-MM-DD' strings in Moscow time. Never toISOString() on a local date — it shifts the day.
-function today() {
-  const parts = new Intl.DateTimeFormat('ru-RU', {
-    timeZone: 'Europe/Moscow',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date());
-  const get = (type) => parts.find((p) => p.type === type).value;
-  return `${get('year')}-${get('month')}-${get('day')}`;
-}
-
-function addDays(date, n) {
-  const [y, m, d] = date.split('-').map(Number);
-  return new Date(Date.UTC(y, m - 1, d + n)).toISOString().slice(0, 10);
-}
-
-const short = (date) => `${date.slice(8, 10)}.${date.slice(5, 7)}`;
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
 function stateOf(sub, now) {
@@ -52,6 +40,7 @@ function stateOf(sub, now) {
   const expired = now > sub.until;
   const checkedToday = sub.visits.includes(now);
   // A used-up card stays on top until the end of the day, so the last star can still be shown to the admin.
+  // Otherwise a finished subscription goes to the archive.
   return { left, expired, checkedToday, active: !expired && (left > 0 || checkedToday) };
 }
 
@@ -161,7 +150,7 @@ function showHome() {
   setBack(null);
   const now = today();
   const active = subs.filter((s) => stateOf(s, now).active);
-  const past = subs.filter((s) => !stateOf(s, now).active);
+  const archived = subs.length - active.length;
 
   const hello = `<header class="hello">
       <h1>Привет, ${esc(profile.name)}</h1>
@@ -171,20 +160,57 @@ function showHome() {
     ? `<div class="stack">${active.map((s) => cardBlock(s, now)).join('')}</div>
        <button class="btn btn--ghost" data-act="buy">Купить ещё абонемент</button>`
     : `<p class="lead">У тебя пока нет абонемента. Выбери направление:</p>${directionList()}`;
-  const history = past.length
-    ? `<h2 class="section">Закончились</h2><div class="stack">${past.map((s) => card(s, now)).join('')}</div>`
-    : '';
+  const archiveNote =
+    [archived && subsWord(archived), events.length && eventsWord(events.length)].filter(Boolean).join(' · ') ||
+    'пока пусто';
+  const menu = `<div class="list menu">
+      <button class="tile" data-act="event">
+        <span class="tile__main"><span class="tile__title">Я на мероприятии</span><span class="tile__sub">без абонемента, идёт в статус</span></span>
+        <span class="chev">›</span>
+      </button>
+      <button class="tile" data-act="archive">
+        <span class="tile__main"><span class="tile__title">Архив</span><span class="tile__sub">${archiveNote}</span></span>
+        <span class="chev">›</span>
+      </button>
+    </div>`;
 
-  render(hello + body + history, {
+  render(hello + statusBlock(now) + body + menu, {
     rename: () => showName(),
     buy: () => showDirections(),
     dir: (id) => showPlans(id, showHome),
     renew: (id) => showPlans(subs.find((s) => s.id === id).direction, showHome),
     checkin: (id, btn) => checkIn(id, btn),
+    event: () => showEvent(),
+    archive: () => showArchive(),
   });
 
   app.querySelector('.cell--new')?.scrollIntoView({ block: 'center' });
   justChecked = null;
+  flash = null;
+}
+
+function statusBlock(now) {
+  const st = clubStatus(subs, events, now);
+  const n = st.next;
+  let next = 'Это высший статус клуба';
+  if (n && st.level.id === 'guest') {
+    next = `До <b>Red</b>: ещё ${lessonsWord(n.lessonsLeft)} или ${eventsWord(n.eventsLeft)}, либо взнос 1&nbsp;000&nbsp;₽`;
+  } else if (n) {
+    const counts =
+      n.subsLeft && n.eventsLeft ? `ещё ${subsWord(n.subsLeft)} или ${eventsWord(n.eventsLeft)} за последний год` : '';
+    const wait = n.yearFrom > now ? `год в ${st.level.name} исполнится ${full(n.yearFrom)}` : '';
+    next = `До <b>${n.name}</b>: ${[counts, wait].filter(Boolean).join('; ')}`;
+  }
+  return `<section class="status${flash ? ' status--flash' : ''}">
+      <div class="status__head">
+        <span class="pill pill--${st.level.id}">${st.level.name}</span>
+        ${st.since ? `<span class="hint">с ${full(st.since)}</span>` : ''}
+      </div>
+      <div class="status__counts">Всего: ${lessonsWord(st.lessons)} · ${eventsWord(st.events)}</div>
+      ${n ? `<div class="bar"><div class="bar__fill" style="width: ${Math.round(n.progress * 100)}%"></div></div>` : ''}
+      <p class="status__next">${next}</p>
+      ${flash ? `<p class="status__flash">✓ ${esc(flash)}</p>` : ''}
+    </section>`;
 }
 
 function cardBlock(sub, now) {
@@ -209,13 +235,14 @@ function card(sub, now) {
   }).join('');
 
   let status = left > 0 ? `осталось ${left} из ${sub.size}` : 'все занятия использованы';
-  if (expired && left > 0) status = `срок закончился ${short(sub.until)}, сгорело ${lessons(left)}`;
+  if (expired && left > 0) status = `срок закончился ${short(sub.until)}, сгорело ${lessonsWord(left)}`;
+  const period = active ? `до ${short(sub.until)}` : `${short(sub.bought)} – ${full(sub.until)}`;
 
   return `<article class="card${active ? '' : ' card--past'}">
       <div class="card__head">
         <div>
           <div class="card__title">${esc(sub.title)}</div>
-          <div class="card__meta">${lessons(sub.size)} · до ${short(sub.until)}</div>
+          <div class="card__meta">${lessonsWord(sub.size)} · ${period}</div>
         </div>
         <img class="card__logo" src="logo.jpg" alt="qlub">
       </div>
@@ -223,6 +250,69 @@ function card(sub, now) {
       <div class="cells">${cells}</div>
       <div class="card__foot">${status}</div>
     </article>`;
+}
+
+function showArchive() {
+  setBack(showHome);
+  const now = today();
+  const past = subs.filter((s) => !stateOf(s, now).active);
+  const subsPart = past.length
+    ? `<h2 class="section">Абонементы · ${past.length}</h2>
+       <div class="stack">${past.map((s) => card(s, now)).join('')}</div>`
+    : '';
+  const eventsPart = events.length
+    ? `<h2 class="section">Мероприятия · ${events.length}</h2>
+       <div class="list">${events
+         .map((e) => `<div class="row"><span class="row__title">${esc(e.title)}</span><span class="hint">${full(e.date)}</span></div>`)
+         .join('')}</div>`
+    : '';
+  const empty =
+    past.length || events.length
+      ? ''
+      : '<p class="lead">Пока пусто. Сюда попадут закончившиеся абонементы и мероприятия, на которых ты отметишься.</p>';
+  render(`${backLink()}<h1>Архив</h1>${empty}${subsPart}${eventsPart}`);
+}
+
+function showEvent() {
+  setBack(showHome);
+  render(`${backLink()}
+    <h1>Я на мероприятии</h1>
+    <p class="lead">Абонемент не нужен — мероприятия идут в счёт статуса.</p>
+    <form id="event-form">
+      <input class="input" id="event-title" maxlength="60" placeholder="Название, например «Кино»">
+      <button class="btn" type="submit">Отметиться</button>
+    </form>`);
+
+  const form = document.getElementById('event-form');
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const btn = form.querySelector('button');
+    const title = document.getElementById('event-title').value.trim() || 'Мероприятие';
+    const now = today();
+    btn.disabled = true;
+    const question = events.some((ev) => ev.date === now)
+      ? `Сегодня уже есть отметка на мероприятии. Отметить ещё «${title}»?`
+      : `Отметиться на мероприятии «${title}» сегодня, ${short(now)}?`;
+    if (!(await confirmDialog(question))) {
+      btn.disabled = false;
+      return;
+    }
+    btn.textContent = 'Отмечаем…';
+    const event = { id: newId(), date: now, title };
+    try {
+      await store.saveEvent(event);
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      btn.textContent = 'Отметиться';
+      alertDialog('Не получилось отметиться. Попробуй ещё раз.');
+      return;
+    }
+    events = [event, ...events];
+    flash = `Мероприятие «${title}» отмечено`;
+    haptic();
+    showHome();
+  });
 }
 
 function directionList() {
@@ -258,8 +348,8 @@ function showPlans(dirId, back) {
       .map(
         (p) => `<button class="tile" data-act="plan" data-arg="${p.size}">
           <span class="tile__main">
-            <span class="tile__title">${lessons(p.size)}</span>
-            <span class="tile__sub">${days(DAYS_BY_SIZE[p.size])} · ${rub(Math.round(p.price / p.size))} за занятие</span>
+            <span class="tile__title">${lessonsWord(p.size)}</span>
+            <span class="tile__sub">${daysWord(DAYS_BY_SIZE[p.size])} · ${rub(Math.round(p.price / p.size))} за занятие</span>
           </span>
           <span class="tile__side">${rub(p.price)}</span>
         </button>`,
@@ -285,10 +375,10 @@ function showPayment(dir, plan, back) {
 
   render(
     `${backLink()}
-    <h1>${dir.name} · ${lessons(plan.size)}</h1>
+    <h1>${dir.name} · ${lessonsWord(plan.size)}</h1>
     <div class="summary">
       <div class="summary__sum">${rub(plan.price)}</div>
-      <div class="hint">${days(DAYS_BY_SIZE[plan.size])}, до ${short(until)}</div>
+      <div class="hint">${daysWord(DAYS_BY_SIZE[plan.size])}, до ${short(until)}</div>
     </div>
     ${how}
     <p class="hint">После перевода нажми «Оплатил(а)» — абонемент сразу появится, а админ проверит оплату.</p>
@@ -304,7 +394,7 @@ function showPayment(dir, plan, back) {
 
 async function buy(dir, plan, btn) {
   btn.disabled = true;
-  if (!(await confirmDialog(`Купить ${dir.name} · ${lessons(plan.size)} за ${rub(plan.price)}?`))) {
+  if (!(await confirmDialog(`Купить ${dir.name} · ${lessonsWord(plan.size)} за ${rub(plan.price)}?`))) {
     btn.disabled = false;
     return;
   }
@@ -383,7 +473,7 @@ async function start() {
   tg?.expand();
   showLoading();
   try {
-    [profile, subs] = await Promise.all([store.loadProfile(), store.loadSubscriptions()]);
+    [profile, subs, events] = await Promise.all([store.loadProfile(), store.loadSubscriptions(), store.loadEvents()]);
   } catch (err) {
     console.error(err);
     showError();

@@ -151,6 +151,66 @@ button {
 
 .stack { display: grid; gap: 24px; }
 
+.menu { margin-top: 24px; }
+.chev { flex: none; font-size: 24px; line-height: 1; color: var(--hint); }
+
+/* ---------- club status ---------- */
+
+.status {
+  margin: 0 0 20px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--surface);
+}
+.status--flash { animation: nudge 0.5s ease-out; }
+.status__head { display: flex; align-items: center; gap: 8px; }
+.status__head .hint { margin: 0; }
+.status__counts { margin-top: 10px; font-weight: 600; }
+.status__next { margin: 6px 0 0; font-size: 14px; color: var(--hint); }
+.status__next b { color: var(--text); }
+.status__flash { margin: 8px 0 0; font-size: 14px; font-weight: 600; }
+
+.bar {
+  height: 6px;
+  margin-top: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.bar__fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--cyan), var(--mint));
+}
+
+/* Status colors — from the club rules PDF. */
+.pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.pill--guest { background: #e6e7ea; color: #3a3d44; }
+.pill--red { background: #f6c9c9; color: #9b1c1c; }
+.pill--gold { background: #ffe8a3; color: #7a5a00; }
+.pill--diamond { background: #cfe3f8; color: #1d4f8a; }
+.pill--black { background: #0a0a0a; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.3); }
+
+/* ---------- archive ---------- */
+
+.row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.row__title { overflow-wrap: anywhere; }
+.row .hint { margin: 0; white-space: nowrap; }
+
 /* ---------- subscription card ---------- */
 
 .card {
@@ -174,7 +234,7 @@ button {
 .card__logo { width: 56px; flex: none; mix-blend-mode: lighten; }
 .card__foot { margin-top: 12px; font-size: 14px; color: rgba(255, 255, 255, 0.6); }
 
-.card--past { filter: grayscale(1); opacity: 0.5; box-shadow: none; }
+.card--past { filter: grayscale(1); opacity: 0.65; box-shadow: none; }
 
 .badge {
   display: inline-block;
@@ -268,6 +328,11 @@ button {
   to { opacity: 1; }
 }
 
+@keyframes nudge {
+  from { transform: scale(0.97); }
+  to { transform: scale(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .cell--new, .loading .logo-tile { animation: none; }
+  .cell--new, .loading .logo-tile, .status--flash { animation: none; }
 }
