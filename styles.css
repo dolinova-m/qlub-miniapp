@@ -1,0 +1,273 @@
+/* qlub brand: black card, cyan and mint dots from the logo. Page colors follow the Telegram theme. */
+:root {
+  --cyan: #31dfff;
+  --mint: #51fccf;
+  --ink: #0a0a0a;
+  --bg: var(--tg-theme-bg-color, #ffffff);
+  --text: var(--tg-theme-text-color, #0a0a0a);
+  --hint: var(--tg-theme-hint-color, #8a8f98);
+  --surface: var(--tg-theme-secondary-bg-color, #f1f2f4);
+  --line: rgba(127, 127, 127, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--tg-theme-bg-color, #131417);
+    --text: var(--tg-theme-text-color, #f3f4f6);
+    --hint: var(--tg-theme-hint-color, #8d9099);
+    --surface: var(--tg-theme-secondary-bg-color, #1f2126);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+#app {
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 16px 16px calc(24px + env(safe-area-inset-bottom));
+}
+
+h1 {
+  margin: 8px 0 12px;
+  font-size: 24px;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+p { margin: 8px 0; }
+
+.section {
+  margin: 24px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hint);
+}
+
+.lead { margin: 0 0 8px; color: var(--hint); }
+.hint { font-size: 14px; color: var(--hint); }
+.center { text-align: center; }
+
+/* ---------- buttons ---------- */
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 15px 16px;
+  border: 0;
+  border-radius: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  background: linear-gradient(135deg, var(--cyan), var(--mint));
+  transition: transform 0.1s, opacity 0.2s;
+}
+.btn:active { transform: scale(0.98); }
+.btn:disabled { opacity: 0.5; }
+.btn--ghost { background: var(--surface); color: var(--text); margin-top: 20px; }
+
+.link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 14px;
+  color: var(--hint);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+
+.back {
+  margin-bottom: 4px;
+  padding: 4px 0;
+  border: 0;
+  background: none;
+  color: var(--hint);
+}
+
+/* ---------- first screen ---------- */
+
+.loading {
+  min-height: 80vh;
+  display: grid;
+  place-items: center;
+}
+.loading .logo-tile { animation: breathe 1.2s ease-in-out infinite alternate; }
+
+.welcome { padding-top: 10vh; text-align: center; }
+
+.logo-tile {
+  display: block;
+  width: 120px;
+  margin: 0 auto 24px;
+  border-radius: 28px;
+}
+
+.input {
+  display: block;
+  width: 100%;
+  padding: 14px 16px;
+  border: 1.5px solid var(--line);
+  border-radius: 14px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 18px;
+  text-align: center;
+}
+.input:focus { border-color: var(--cyan); }
+
+/* ---------- home ---------- */
+
+.hello {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 16px;
+}
+.hello h1 { margin: 0; }
+
+.stack { display: grid; gap: 24px; }
+
+/* ---------- subscription card ---------- */
+
+.card {
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  background: #0a0a0a;
+  color: #fff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+}
+
+.card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.card__title { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.card__meta { margin-top: 2px; font-size: 14px; color: rgba(255, 255, 255, 0.6); }
+.card__logo { width: 56px; flex: none; mix-blend-mode: lighten; }
+.card__foot { margin-top: 12px; font-size: 14px; color: rgba(255, 255, 255, 0.6); }
+
+.card--past { filter: grayscale(1); opacity: 0.5; box-shadow: none; }
+
+.badge {
+  display: inline-block;
+  margin: -4px 0 12px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 196, 0, 0.14);
+  color: #ffd466;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cells {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+
+.cell {
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed rgba(255, 255, 255, 0.22);
+  border-radius: 12px;
+}
+.cell__num { font-size: 13px; color: rgba(255, 255, 255, 0.28); }
+
+.cell--done { border: 1.5px solid rgba(49, 223, 255, 0.9); background: rgba(49, 223, 255, 0.1); }
+.cell__star { font-size: 22px; line-height: 1; color: var(--mint); }
+.cell__date { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.cell--new { animation: pop 0.5s cubic-bezier(0.2, 0.8, 0.3, 1.4), glow 1.4s ease-out 0.2s 3; }
+
+/* ---------- buying ---------- */
+
+.list { display: grid; gap: 8px; }
+
+.tile {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: left;
+}
+.tile:active { opacity: 0.7; }
+.tile__main { display: flex; flex-direction: column; min-width: 0; }
+.tile__title { font-weight: 600; }
+.tile__sub { font-size: 13px; color: var(--hint); }
+.tile__side { font-weight: 600; white-space: nowrap; }
+
+.summary {
+  margin: 4px 0 16px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--surface);
+}
+.summary__sum { font-size: 32px; font-weight: 700; }
+.summary .hint { margin: 2px 0 0; }
+
+.copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.copy__value { font-size: 18px; font-weight: 600; }
+
+.ver { margin-top: 32px; font-size: 11px; text-align: center; color: var(--hint); opacity: 0.6; }
+
+@keyframes pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes glow {
+  from { box-shadow: 0 0 0 0 rgba(81, 252, 207, 0.65); }
+  to { box-shadow: 0 0 0 14px rgba(81, 252, 207, 0); }
+}
+
+@keyframes breathe {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cell--new, .loading .logo-tile { animation: none; }
+}
