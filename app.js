@@ -1,9 +1,10 @@
-import { DIRECTIONS, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT } from './catalog.js?v=2';
-import { today, addDays, short, full } from './dates.js?v=2';
-import { clubStatus } from './status.js?v=2';
-import * as store from './store.js?v=2';
+import { DIRECTIONS, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT } from './catalog.js?v=3';
+import { today, addDays, short, full } from './dates.js?v=3';
+import { clubStatus } from './status.js?v=3';
+import { BONUS_BY_LEVEL, bonusOf, bonusAlive, bonusSource, availableBonuses } from './bonuses.js?v=3';
+import * as store from './store.js?v=3';
 
-const VERSION = 2;
+const VERSION = 3;
 const tg = window.Telegram?.WebApp;
 const supports = (version) => !!tg?.isVersionAtLeast?.(version);
 const app = document.getElementById('app');
@@ -11,6 +12,7 @@ const app = document.getElementById('app');
 let profile = null;
 let subs = [];
 let events = [];
+let status = null; // club status — recomputed by recalc() before a screen uses subscriptions
 let justChecked = null; // { id, index } — the cell to animate on the next render
 let flash = null; // one-time note in the status block after marking an event
 let actions = {};
@@ -21,6 +23,7 @@ const esc = (s) =>
   String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const rub = (n) => `${n.toLocaleString('ru-RU')} ₽`;
 const lessonsWord = (n) => `${n} ${plural(n, 'занятие', 'занятия', 'занятий')}`;
+const bonusWord = (n) => `${n} ${plural(n, 'бонусное занятие', 'бонусных занятия', 'бонусных занятий')}`;
 const eventsWord = (n) => `${n} ${plural(n, 'мероприятие', 'мероприятия', 'мероприятий')}`;
 const subsWord = (n) => `${n} ${plural(n, 'абонемент', 'абонемента', 'абонементов')}`;
 const daysWord = (n) => `${n} ${plural(n, 'день', 'дня', 'дней')}`;
@@ -35,13 +38,19 @@ function plural(n, one, few, many) {
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+function recalc(now) {
+  status = clubStatus(subs, events, now);
+}
+
 function stateOf(sub, now) {
   const left = sub.size - sub.visits.length;
   const expired = now > sub.until;
-  const checkedToday = sub.visits.includes(now);
-  // A used-up card stays on top until the end of the day, so the last star can still be shown to the admin.
-  // Otherwise a finished subscription goes to the archive.
-  return { left, expired, checkedToday, active: !expired && (left > 0 || checkedToday) };
+  const bonus = bonusOf(sub, status.history);
+  const alive = bonusAlive(bonus, now);
+  const checkedToday = sub.visits.includes(now) || (sub.bonusVisits || []).some((b) => b.date === now);
+  // A card stays on the home screen while its lessons or bonuses can be used, and until the end of the day
+  // after a check-in, so the last star can still be shown to the admin. Otherwise it goes to the archive.
+  return { left, expired, bonus, bonusAlive: alive, active: (!expired && left > 0) || alive || checkedToday };
 }
 
 // ---------- Telegram glue (with browser fallbacks) ----------
@@ -149,6 +158,7 @@ function showName() {
 function showHome() {
   setBack(null);
   const now = today();
+  recalc(now);
   const active = subs.filter((s) => stateOf(s, now).active);
   const archived = subs.length - active.length;
 
@@ -190,7 +200,7 @@ function showHome() {
 }
 
 function statusBlock(now) {
-  const st = clubStatus(subs, events, now);
+  const st = status;
   const n = st.next;
   let next = 'Это высший статус клуба';
   if (n && st.level.id === 'guest') {
@@ -201,6 +211,16 @@ function statusBlock(now) {
     const wait = n.yearFrom > now ? `год в ${st.level.name} исполнится ${full(n.yearFrom)}` : '';
     next = `До <b>${n.name}</b>: ${[counts, wait].filter(Boolean).join('; ')}`;
   }
+
+  const perSub = BONUS_BY_LEVEL[st.level.id];
+  const available = availableBonuses(subs, st.history, now);
+  let bonusLine = '';
+  if (available.count) {
+    bonusLine = `<p class="status__bonus"><span class="gift-chip">🎁 ${bonusWord(available.count)}</span> до ${short(available.until)}</p>`;
+  } else if (perSub) {
+    bonusLine = `<p class="status__bonus hint">🎁 ${st.level.name}: +${bonusWord(perSub)} к каждому новому абонементу</p>`;
+  }
+
   return `<section class="status${flash ? ' status--flash' : ''}">
       <div class="status__head">
         <span class="pill pill--${st.level.id}">${st.level.name}</span>
@@ -209,34 +229,60 @@ function statusBlock(now) {
       <div class="status__counts">Всего: ${lessonsWord(st.lessons)} · ${eventsWord(st.events)}</div>
       ${n ? `<div class="bar"><div class="bar__fill" style="width: ${Math.round(n.progress * 100)}%"></div></div>` : ''}
       <p class="status__next">${next}</p>
+      ${bonusLine}
       ${flash ? `<p class="status__flash">✓ ${esc(flash)}</p>` : ''}
     </section>`;
 }
 
 function cardBlock(sub, now) {
-  const { left } = stateOf(sub, now);
+  const { left, expired } = stateOf(sub, now);
   const note = justChecked?.id === sub.id ? '<p class="hint center">Отмечено! Покажи карточку админу</p>' : '';
-  const action =
-    left > 0
-      ? `<button class="btn" data-act="checkin" data-arg="${sub.id}">Я на занятии</button>`
-      : `<button class="btn" data-act="renew" data-arg="${sub.id}">Купить новый абонемент</button>`;
+  let action;
+  if (!expired && left > 0) {
+    action = `<button class="btn" data-act="checkin" data-arg="${sub.id}">Я на занятии</button>`;
+  } else if (bonusSource(subs, status.history, now)) {
+    action = `<button class="btn btn--bonus" data-act="checkin" data-arg="${sub.id}">Я на занятии · за бонус 🎁</button>
+      <button class="link link--center" data-act="renew" data-arg="${sub.id}">Купить новый абонемент</button>`;
+  } else {
+    action = `<button class="btn" data-act="renew" data-arg="${sub.id}">Купить новый абонемент</button>`;
+  }
   return `<div>${card(sub, now)}${note}${action}</div>`;
 }
 
 function card(sub, now) {
-  const { left, expired, active } = stateOf(sub, now);
-  const cells = Array.from({ length: sub.size }, (_, i) => {
+  const { left, expired, active, bonus, bonusAlive: alive } = stateOf(sub, now);
+  const fresh = (index) => (justChecked?.id === sub.id && justChecked.index === index ? ' cell--new' : '');
+  const off = expired ? ' cell--off' : '';
+
+  const mainCells = Array.from({ length: sub.size }, (_, i) => {
     const visit = sub.visits[i];
-    if (!visit) return `<div class="cell"><span class="cell__num">${i + 1}</span></div>`;
-    const fresh = justChecked?.id === sub.id && justChecked.index === i;
-    return `<div class="cell cell--done${fresh ? ' cell--new' : ''}">
+    if (!visit) return `<div class="cell${off}"><span class="cell__num">${i + 1}</span></div>`;
+    return `<div class="cell cell--done${off}${fresh(i)}">
         <span class="cell__star">★</span><span class="cell__date">${short(visit)}</span>
       </div>`;
-  }).join('');
+  });
 
-  let status = left > 0 ? `осталось ${left} из ${sub.size}` : 'все занятия использованы';
-  if (expired && left > 0) status = `срок закончился ${short(sub.until)}, сгорело ${lessonsWord(left)}`;
-  const period = active ? `до ${short(sub.until)}` : `${short(sub.bought)} – ${full(sub.until)}`;
+  // Bonus cells go after the main ones; a bonus spent on another direction is signed with its name.
+  const bonusVisits = sub.bonusVisits || [];
+  const bonusCells = Array.from({ length: Math.max(bonus.total, bonusVisits.length) }, (_, i) => {
+    const visit = bonusVisits[i];
+    if (!visit) {
+      return `<div class="cell cell--bonus${now > bonus.until ? ' cell--off' : ''}">
+          <span class="cell__gift">🎁</span><span class="cell__num">бонус</span>
+        </div>`;
+    }
+    const label = visit.direction !== sub.direction ? `<span class="cell__label">${esc(visit.title)}</span>` : '';
+    return `<div class="cell cell--bonus cell--bonus-done${fresh(sub.size + i)}">
+        <span class="cell__gift">🎁</span><span class="cell__date">${short(visit.date)}</span>${label}
+      </div>`;
+  });
+
+  let mainStatus = left > 0 ? `осталось ${left} из ${sub.size}` : 'все занятия использованы';
+  if (expired && left > 0) mainStatus = `срок закончился ${short(sub.until)}, сгорело ${lessonsWord(left)}`;
+  let bonusStatus = '';
+  if (alive) bonusStatus = `🎁 ${bonusWord(bonus.left)} до ${short(bonus.until)}`;
+  else if (bonus.left > 0) bonusStatus = `🎁 ${bonus.left > 1 ? 'бонусы сгорели' : 'бонус сгорел'} ${short(bonus.until)}`;
+  const period = active && !expired ? `до ${short(sub.until)}` : `${short(sub.bought)} – ${full(sub.until)}`;
 
   return `<article class="card${active ? '' : ' card--past'}">
       <div class="card__head">
@@ -247,14 +293,16 @@ function card(sub, now) {
         <img class="card__logo" src="logo.jpg" alt="qlub">
       </div>
       ${active && sub.payment === 'pending' ? '<div class="badge">оплата проверяется</div>' : ''}
-      <div class="cells">${cells}</div>
-      <div class="card__foot">${status}</div>
+      <div class="cells">${[...mainCells, ...bonusCells].join('')}</div>
+      <div class="card__foot">${mainStatus}</div>
+      ${bonusStatus ? `<div class="card__bonus">${bonusStatus}</div>` : ''}
     </article>`;
 }
 
 function showArchive() {
   setBack(showHome);
   const now = today();
+  recalc(now);
   const past = subs.filter((s) => !stateOf(s, now).active);
   const subsPart = past.length
     ? `<h2 class="section">Абонементы · ${past.length}</h2>
@@ -366,7 +414,13 @@ function showPlans(dirId, back) {
 
 function showPayment(dir, plan, back) {
   setBack(back);
-  const until = addDays(today(), DAYS_BY_SIZE[plan.size]);
+  const now = today();
+  recalc(now);
+  const until = addDays(now, DAYS_BY_SIZE[plan.size]);
+  const perSub = BONUS_BY_LEVEL[status.level.id];
+  const bonusNote = perSub
+    ? `<div class="summary__bonus"><span class="gift-chip">🎁 +${bonusWord(perSub)}</span> — у тебя ${status.level.name}</div>`
+    : '';
   const how = PAY_PHONE
     ? `<p>Переведи <b>${rub(plan.price)}</b> по номеру:</p>
        <div class="copy"><span class="copy__value">${esc(PAY_PHONE)}</span><button class="link" data-act="copy">Скопировать</button></div>
@@ -379,6 +433,7 @@ function showPayment(dir, plan, back) {
     <div class="summary">
       <div class="summary__sum">${rub(plan.price)}</div>
       <div class="hint">${daysWord(DAYS_BY_SIZE[plan.size])}, до ${short(until)}</div>
+      ${bonusNote}
     </div>
     ${how}
     <p class="hint">После перевода нажми «Оплатил(а)» — абонемент сразу появится, а админ проверит оплату.</p>
@@ -410,6 +465,7 @@ async function buy(dir, plan, btn) {
     until: addDays(now, DAYS_BY_SIZE[plan.size]),
     payment: 'pending',
     visits: [],
+    bonusVisits: [],
   };
   try {
     await store.saveSubscription(sub);
@@ -425,34 +481,53 @@ async function buy(dir, plan, btn) {
   showHome();
 }
 
+// A lesson from the card's own subscription while it has lessons; otherwise a bonus lesson,
+// taken from the oldest subscription with a bonus still alive.
 async function checkIn(id, btn) {
-  const sub = subs.find((s) => s.id === id);
   const now = today();
-  const { left, expired, checkedToday } = stateOf(sub, now);
-  if (left <= 0 || expired) return;
+  recalc(now);
+  const sub = subs.find((s) => s.id === id);
+  const { left, expired } = stateOf(sub, now);
+  const byBonus = expired || left <= 0;
+  const target = byBonus ? bonusSource(subs, status.history, now) : sub;
+  if (!target) return;
 
   btn.disabled = true;
-  const question = checkedToday
-    ? 'Сегодня уже есть отметка. Отметить ещё одно занятие?'
-    : `Отметиться на занятии сегодня, ${short(now)}?`;
+  const visitedToday = subs.some(
+    (s) =>
+      (s.direction === sub.direction && s.visits.includes(now)) ||
+      (s.bonusVisits || []).some((b) => b.date === now && b.direction === sub.direction),
+  );
+  const question = visitedToday
+    ? `Сегодня уже есть отметка (${sub.title}). Отметить ещё одно занятие${byBonus ? ' за бонус 🎁' : ''}?`
+    : `Отметиться на занятии сегодня, ${short(now)}${byBonus ? ', за бонус 🎁' : ''}?`;
   if (!(await confirmDialog(question))) {
     btn.disabled = false;
     return;
   }
+  const label = btn.textContent;
   btn.textContent = 'Отмечаем…';
 
-  const updated = { ...sub, visits: [...sub.visits, now].sort() };
+  const updated = byBonus
+    ? {
+        ...target,
+        bonusVisits: [...(target.bonusVisits || []), { date: now, direction: sub.direction, title: sub.title }],
+      }
+    : { ...sub, visits: [...sub.visits, now].sort() };
   try {
     await store.saveSubscription(updated);
   } catch (err) {
     console.error(err);
     btn.disabled = false;
-    btn.textContent = 'Я на занятии';
+    btn.textContent = label;
     alertDialog('Не получилось отметиться. Попробуй ещё раз.');
     return;
   }
-  subs = subs.map((s) => (s.id === id ? updated : s));
-  justChecked = { id, index: updated.visits.lastIndexOf(now) };
+  subs = subs.map((s) => (s.id === updated.id ? updated : s));
+  justChecked = {
+    id: updated.id,
+    index: byBonus ? updated.size + updated.bonusVisits.length - 1 : updated.visits.lastIndexOf(now),
+  };
   haptic();
   showHome();
 }

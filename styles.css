@@ -2,6 +2,7 @@
 :root {
   --cyan: #31dfff;
   --mint: #51fccf;
+  --gift: #ff7eb6;
   --ink: #0a0a0a;
   --bg: var(--tg-theme-bg-color, #ffffff);
   --text: var(--tg-theme-text-color, #0a0a0a);
@@ -85,6 +86,17 @@ button {
 .btn:active { transform: scale(0.98); }
 .btn:disabled { opacity: 0.5; }
 .btn--ghost { background: var(--surface); color: var(--text); margin-top: 20px; }
+.btn--bonus { background: linear-gradient(135deg, #ff8cc0, #ffc39e); }
+.link--center { display: block; margin: 14px auto 0; }
+
+.gift-chip {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(255, 126, 182, 0.2);
+  color: var(--text);
+  font-weight: 600;
+}
 
 .link {
   padding: 0;
@@ -169,6 +181,9 @@ button {
 .status__next { margin: 6px 0 0; font-size: 14px; color: var(--hint); }
 .status__next b { color: var(--text); }
 .status__flash { margin: 8px 0 0; font-size: 14px; font-weight: 600; }
+.status__bonus { margin: 10px 0 0; font-size: 14px; }
+
+.summary__bonus { margin-top: 10px; font-size: 14px; }
 
 .bar {
   height: 6px;
@@ -269,6 +284,26 @@ button {
 .cell__date { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 .cell--new { animation: pop 0.5s cubic-bezier(0.2, 0.8, 0.3, 1.4), glow 1.4s ease-out 0.2s 3; }
+
+/* Bonus lessons — pink cells with a gift. */
+.cell--bonus { border-color: rgba(255, 126, 182, 0.6); background: rgba(255, 126, 182, 0.08); }
+.cell--bonus .cell__num { margin-top: 4px; font-size: 11px; color: rgba(255, 150, 196, 0.85); }
+.cell__gift { font-size: 20px; line-height: 1; opacity: 0.6; }
+.cell--bonus-done { border-style: solid; border-color: var(--gift); background: rgba(255, 126, 182, 0.2); }
+.cell--bonus-done .cell__gift { opacity: 1; }
+.cell__label {
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 0 4px;
+  overflow: hidden;
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.75);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cell--off { filter: grayscale(1); opacity: 0.35; }
+
+.card__bonus { margin-top: 4px; font-size: 14px; color: #ff9cc7; }
 
 /* ---------- buying ---------- */
 

@@ -1,8 +1,9 @@
-import { addDays, daysBetween } from './dates.js?v=2';
+import { addDays, daysBetween } from './dates.js?v=3';
 
 // Club status ladder — «Клубные статусы и правила абонементов.pdf».
-// Computed from the user's own check-ins and purchases. Not counted yet: single visits, the 1 000 ₽ fee,
-// demotion after 3 months without visits. Lessons and events are separate paths, not summed (open question).
+// Computed from the user's own check-ins and purchases; lessons taken with a bonus count as lessons.
+// Not counted yet: single visits, the 1 000 ₽ fee, demotion after 3 months without visits.
+// Lessons and events are separate paths, not summed (open question).
 export const LEVELS = [
   { id: 'guest', name: 'Гость' },
   { id: 'red', name: 'Red' },
@@ -37,24 +38,41 @@ function upgradeDate(since, subDates, eventDates, now) {
   );
 }
 
+// Level id on a given day, from clubStatus().history.
+export function levelOn(history, date) {
+  let id = LEVELS[0].id;
+  for (const step of history) if (step.since <= date) id = step.id;
+  return id;
+}
+
 export function clubStatus(subs, events, now) {
-  const lessonDates = subs.flatMap((s) => s.visits).sort();
+  const lessonDates = subs.flatMap((s) => [...s.visits, ...(s.bonusVisits || []).map((b) => b.date)]).sort();
   const eventDates = events.map((e) => e.date).sort();
   const subDates = subs.map((s) => s.bought).sort();
 
   let level = 0;
   let since = [lessonDates[RED_LESSONS - 1], eventDates[RED_EVENTS - 1]].filter(Boolean).sort()[0] || null;
+  const history = []; // [{ id, since }] — every level reached, in order
   if (since) {
     level = 1;
+    history.push({ id: LEVELS[level].id, since });
     while (level < LEVELS.length - 1) {
       const next = upgradeDate(since, subDates, eventDates, now);
       if (!next) break;
       level += 1;
       since = next;
+      history.push({ id: LEVELS[level].id, since });
     }
   }
 
-  const result = { level: LEVELS[level], since, lessons: lessonDates.length, events: eventDates.length, next: null };
+  const result = {
+    level: LEVELS[level],
+    since,
+    history,
+    lessons: lessonDates.length,
+    events: eventDates.length,
+    next: null,
+  };
 
   if (level === 0) {
     result.next = {
