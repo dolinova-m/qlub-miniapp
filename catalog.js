@@ -1,5 +1,7 @@
-// Directions and prices.
-// Source: «Цены Москва.pdf» (dances) and user-spec (online languages: 4 lessons — 2 000 ₽, 30 days).
+// Directions and prices. `price` — for one person, `pairPrice` — for a couple (one card for two).
+// `single` — one lesson, `trial` — first lesson on the direction, `plans` — subscriptions.
+// Source: «Цены Москва.pdf» (dances) and user-spec (online languages: single 550 ₽, 4 lessons — 2 000 ₽, 30 days;
+// no pair or trial price).
 
 export const DIRECTIONS = [
   {
@@ -7,34 +9,63 @@ export const DIRECTIONS = [
     group: 'Танцы',
     name: 'Танго',
     note: 'занятие 1,5 часа',
-    plans: [{ size: 4, price: 3300 }, { size: 8, price: 6400 }, { size: 12, price: 9000 }, { size: 16, price: 11600 }],
+    single: { price: 850, pairPrice: 1500 },
+    trial: { price: 400, pairPrice: 700 },
+    plans: [
+      { size: 4, price: 3300, pairPrice: 6100 },
+      { size: 8, price: 6400, pairPrice: 12100 },
+      { size: 12, price: 9000, pairPrice: 16000 },
+      { size: 16, price: 11600, pairPrice: 21000 },
+    ],
   },
   {
     id: 'latina',
     group: 'Танцы',
     name: 'Латина',
     note: 'бачата, сальса, кизомба · 1 час',
-    plans: [{ size: 4, price: 3300 }, { size: 8, price: 5400 }, { size: 12, price: 7500 }, { size: 16, price: 9200 }],
+    single: { price: 850, pairPrice: 1500 },
+    trial: { price: 400, pairPrice: 700 },
+    plans: [
+      { size: 4, price: 3300, pairPrice: 6100 },
+      { size: 8, price: 5400, pairPrice: 10200 },
+      { size: 12, price: 7500, pairPrice: 13350 },
+      { size: 16, price: 9200, pairPrice: 16650 },
+    ],
   },
   {
     id: 'tribal',
     group: 'Танцы',
     name: 'Трайбл фьюжн',
     note: 'занятие 1,5 часа',
-    plans: [{ size: 4, price: 3300 }, { size: 8, price: 6400 }, { size: 12, price: 9000 }, { size: 16, price: 11600 }],
+    single: { price: 850, pairPrice: 1500 },
+    trial: { price: 400, pairPrice: 700 },
+    plans: [
+      { size: 4, price: 3300, pairPrice: 6100 },
+      { size: 8, price: 6400, pairPrice: 12100 },
+      { size: 12, price: 9000, pairPrice: 16000 },
+      { size: 16, price: 11600, pairPrice: 21000 },
+    ],
   },
   {
     id: 'wcs',
     group: 'Танцы',
     name: 'Вест кост свинг',
     note: 'занятие 1 час',
-    plans: [{ size: 4, price: 3300 }, { size: 8, price: 5400 }, { size: 12, price: 7500 }, { size: 16, price: 9200 }],
+    single: { price: 850, pairPrice: 1500 },
+    trial: { price: 400, pairPrice: 700 },
+    plans: [
+      { size: 4, price: 3300, pairPrice: 6100 },
+      { size: 8, price: 5400, pairPrice: 10200 },
+      { size: 12, price: 7500, pairPrice: 13350 },
+      { size: 16, price: 9200, pairPrice: 16650 },
+    ],
   },
   {
     id: 'english',
     group: 'Языки онлайн',
     name: 'Английский',
     note: 'онлайн',
+    single: { price: 550 },
     plans: [{ size: 4, price: 2000 }],
   },
   {
@@ -42,6 +73,7 @@ export const DIRECTIONS = [
     group: 'Языки онлайн',
     name: 'Испанский',
     note: 'онлайн',
+    single: { price: 550 },
     plans: [{ size: 4, price: 2000 }],
   },
 ];
