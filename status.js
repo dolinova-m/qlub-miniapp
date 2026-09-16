@@ -1,4 +1,4 @@
-import { addDays, daysBetween } from './dates.js?v=4';
+import { addDays, daysBetween } from './dates.js?v=5';
 
 // Club status ladder — «Клубные статусы и правила абонементов.pdf».
 // Computed from the user's own check-ins and purchases; single, trial and bonus lessons count as lessons.
@@ -92,6 +92,11 @@ export function clubStatus(subs, events, now) {
       name: LEVELS[1].name,
       lessonsLeft: Math.max(0, RED_LESSONS - lessonDates.length),
       eventsLeft: Math.max(0, RED_EVENTS - eventDates.length),
+      // Every path to the next level — the home screen shows the closest one.
+      paths: [
+        { id: 'lessons', left: Math.max(0, RED_LESSONS - lessonDates.length), total: RED_LESSONS },
+        { id: 'events', left: Math.max(0, RED_EVENTS - eventDates.length), total: RED_EVENTS },
+      ],
       progress: Math.min(1, Math.max(lessonDates.length / RED_LESSONS, eventDates.length / RED_EVENTS)),
     };
   } else if (level < LEVELS.length - 1) {
@@ -104,6 +109,11 @@ export function clubStatus(subs, events, now) {
       subsLeft: Math.max(0, UPGRADE_SUBS - subsYear),
       singlesLeft: Math.max(0, UPGRADE_SINGLES - singlesYear),
       eventsLeft: Math.max(0, UPGRADE_EVENTS - eventsYear),
+      paths: [
+        { id: 'subs', left: Math.max(0, UPGRADE_SUBS - subsYear), total: UPGRADE_SUBS },
+        { id: 'singles', left: Math.max(0, UPGRADE_SINGLES - singlesYear), total: UPGRADE_SINGLES },
+        { id: 'events', left: Math.max(0, UPGRADE_EVENTS - eventsYear), total: UPGRADE_EVENTS },
+      ],
       yearFrom: addDays(since, YEAR), // a year in the current level is reached on this day
       progress: Math.min(
         1,

@@ -1,20 +1,27 @@
-import { DIRECTIONS, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT } from './catalog.js?v=4';
-import { today, addDays, short, full } from './dates.js?v=4';
-import { clubStatus, isSubscription } from './status.js?v=4';
-import { BONUS_BY_LEVEL, bonusOf, bonusAlive, bonusSource, availableBonuses } from './bonuses.js?v=4';
-import * as store from './store.js?v=4';
+import { DIRECTIONS, UNLIMITED, DAYS_BY_SIZE, PAY_PHONE, PAY_RECIPIENT, BOT_USERNAME } from './catalog.js?v=5';
+import { today, addDays, daysBetween, short, full } from './dates.js?v=5';
+import { clubStatus, isSubscription } from './status.js?v=5';
+import { BONUS_BY_LEVEL, bonusOf, bonusAlive, bonusSource, availableBonuses } from './bonuses.js?v=5';
+import * as store from './store.js?v=5';
 
-const VERSION = 4;
+const VERSION = 5;
 const tg = window.Telegram?.WebApp;
 const supports = (version) => !!tg?.isVersionAtLeast?.(version);
 const app = document.getElementById('app');
+
+// «Продлить» shows on a card when this many lessons or days are left, or fewer.
+const RENEW_LESSONS = 1;
+const RENEW_DAYS = 5;
+// A status drops a level after this many days without visits or purchases; the home screen warns a month before.
+const STATUS_IDLE_DAYS = 90;
+const STATUS_WARN_DAYS = 30;
 
 let profile = null;
 let subs = []; // purchases: subscriptions, single and trial lessons (`kind`)
 let events = [];
 let status = null; // club status — recomputed by recalc() before a screen uses purchases
 let justChecked = null; // { id, index } — the cell to animate on the next render
-let flash = null; // one-time note on the home screen after an event or an invite
+let flash = null; // one-time note on the home screen after an event, an invite or a cash purchase
 let actions = {};
 
 // ---------- helpers ----------
@@ -24,6 +31,7 @@ const esc = (s) =>
 const rub = (n) => `${n.toLocaleString('ru-RU')} ₽`;
 const lessonsWord = (n) => `${n} ${plural(n, 'занятие', 'занятия', 'занятий')}`;
 const bonusWord = (n) => `${n} ${plural(n, 'бонусное занятие', 'бонусных занятия', 'бонусных занятий')}`;
+const bonusShort = (n) => `${n} ${plural(n, 'бонус', 'бонуса', 'бонусов')}`;
 const eventsWord = (n) => `${n} ${plural(n, 'мероприятие', 'мероприятия', 'мероприятий')}`;
 const subsWord = (n) => `${n} ${plural(n, 'абонемент', 'абонемента', 'абонементов')}`;
 const singlesWord = (n) => `${n} ${plural(n, 'разовое', 'разовых', 'разовых')}`;
@@ -39,58 +47,92 @@ function plural(n, one, few, many) {
 
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const friendLabel = (friend) => (friend.nick ? `@${friend.nick}` : friend.name || friend.phone);
+// Pair partner: a Telegram nick; records saved before v5 have free text in `partner`.
+const partnerLabel = (pair) => (pair?.nick ? `@${pair.nick}` : pair?.partner || '');
+const TELEGRAM_NICK = /^[A-Za-z0-9_]{4,32}$/;
 
 const KIND_NAMES = { single: 'разовое занятие', trial: 'пробное занятие' };
 const METHODS = {
   transfer: { name: 'переводом', badge: 'оплата проверяется' },
-  cash: { name: 'наличными', badge: 'оплата наличными — отдай админу' },
+  cash: { name: 'наличными', badge: 'отдай наличные админу' },
 };
+
+const findDir = (id) => (id === UNLIMITED.id ? UNLIMITED : DIRECTIONS.find((d) => d.id === id));
+const isUnlimited = (sub) => sub.direction === UNLIMITED.id;
+const planDays = (dir, size) => dir.days || DAYS_BY_SIZE[size];
 
 function recalc(now) {
   status = clubStatus(subs, events, now);
 }
 
 function stateOf(sub, now) {
-  const left = sub.size - sub.visits.length;
+  const unlimited = isUnlimited(sub);
+  const left = unlimited ? Infinity : sub.size - sub.visits.length;
   const expired = now > sub.until;
   const bonus = bonusOf(sub, status.history);
   const alive = bonusAlive(bonus, now);
   const checkedToday = sub.visits.includes(now) || (sub.bonusVisits || []).some((b) => b.date === now);
+  // Ending — time to buy the next one: few lessons or days left, or already over.
+  const ending = expired || left <= RENEW_LESSONS || daysBetween(now, sub.until) <= RENEW_DAYS;
   // A card stays on the home screen while its lessons or bonuses can be used, and until the end of the day
-  // after a check-in, so the last star can still be shown to the admin. Otherwise it goes to the archive.
-  return { left, expired, bonus, bonusAlive: alive, active: (!expired && left > 0) || alive || checkedToday };
+  // after a check-in, so the last star can still be shown to the admin. Otherwise it goes to the history.
+  return {
+    unlimited,
+    left,
+    expired,
+    ending,
+    bonus,
+    bonusAlive: alive,
+    active: (!expired && left > 0) || alive || checkedToday,
+  };
 }
 
-// One personal and one pair subscription per direction at a time: a new one only when the current has no lessons
-// left or has expired. Single and trial lessons are not limited.
+// One running personal and one pair subscription per direction: a new one only when the current one is ending —
+// the same moment its card offers «Продлить». Single and trial lessons are not limited.
 function subscriptionOptions(dir, now) {
   const running = (pair) =>
-    subs.some(
-      (s) =>
-        isSubscription(s) && s.direction === dir.id && !!s.pair === pair && now <= s.until && s.visits.length < s.size,
-    );
-  const single = !running(false);
-  const pair = dir.plans.some((p) => p.pairPrice) && !running(true);
-  const prices = [
-    ...(single ? dir.plans.map((p) => p.price) : []),
-    ...(pair ? dir.plans.filter((p) => p.pairPrice).map((p) => p.pairPrice) : []),
-  ];
-  return { single, pair, minPrice: prices.length ? Math.min(...prices) : 0 };
+    subs.some((s) => isSubscription(s) && s.direction === dir.id && !!s.pair === pair && !stateOf(s, now).ending);
+  return { single: !running(false), pair: dir.plans.some((p) => p.pairPrice) && !running(true) };
 }
 
-// A trial lesson is for those who have not been to this direction yet (open question: or to the club at all).
-const trialAllowed = (dir) =>
-  !!dir.trial &&
-  !subs.some(
+// A newer subscription of the same kind on the same direction was bought — the old card stops offering «Продлить».
+const renewedBy = (sub) =>
+  subs.some(
     (s) =>
-      (s.direction === dir.id && s.visits.length) ||
-      (s.bonusVisits || []).some((b) => b.direction === dir.id && !b.friend),
+      s.id !== sub.id &&
+      isSubscription(s) &&
+      s.direction === sub.direction &&
+      !!s.pair === !!sub.pair &&
+      (s.bought > sub.bought || (s.bought === sub.bought && s.id > sub.id)),
   );
+
+// The same subscription at today's price, or null if the catalog no longer has it.
+function renewItem(sub) {
+  const dir = findDir(sub.direction);
+  const plan = dir?.plans.find((p) => p.size === sub.size);
+  const price = plan && (sub.pair ? plan.pairPrice : plan.price);
+  return price ? { dir, kind: 'subscription', size: plan.size, pair: !!sub.pair, price } : null;
+}
+
+const canRenew = (sub, now) => isSubscription(sub) && stateOf(sub, now).ending && !renewedBy(sub) && !!renewItem(sub);
+
+// A trial lesson is only for newcomers — those who have not been to the club at all.
+const trialAllowed = (dir) => !!dir.trial && !subs.length && !events.length;
 
 // What is being bought: { dir, kind: 'subscription' | 'single' | 'trial', size, pair, price }.
 function itemName(item) {
-  const what = item.kind === 'subscription' ? lessonsWord(item.size) : KIND_NAMES[item.kind];
+  let what = KIND_NAMES[item.kind];
+  if (item.kind === 'subscription') what = item.size ? lessonsWord(item.size) : UNLIMITED.note;
   return `${item.dir.name} · ${what}${item.pair ? ' · для пары' : ''}`;
+}
+
+// The last visit or purchase — a status is kept while there is one within STATUS_IDLE_DAYS.
+function lastActivity() {
+  const dates = [
+    ...subs.flatMap((s) => [s.bought, ...s.visits, ...(s.bonusVisits || []).filter((b) => !b.friend).map((b) => b.date)]),
+    ...events.map((e) => e.date),
+  ].sort();
+  return dates[dates.length - 1] || null;
 }
 
 // ---------- Telegram glue (with browser fallbacks) ----------
@@ -107,6 +149,14 @@ function alertDialog(text) {
 
 function haptic() {
   if (supports('6.1')) tg.HapticFeedback.notificationOccurred('success');
+}
+
+// The screenshot of a transfer goes to the bot chat; the bot forwards it to the admins.
+function openBotChat() {
+  if (BOT_USERNAME && supports('6.1')) tg.openTelegramLink(`https://t.me/${BOT_USERNAME}`);
+  else if (BOT_USERNAME) window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
+  else if (tg?.initData) tg.close();
+  else alertDialog('Открой чат с ботом qlub и отправь туда скриншот перевода.');
 }
 
 const nativeBack = supports('6.1');
@@ -201,6 +251,7 @@ function showName() {
   });
 }
 
+// Home: subscription cards, the club status, links. Buying stays out of the way until it is needed.
 function showHome() {
   setBack(null);
   const now = today();
@@ -213,12 +264,15 @@ function showHome() {
       <button class="link" data-act="rename">изменить имя</button>
     </header>
     ${flash ? `<p class="flash">✓ ${esc(flash)}</p>` : ''}`;
-  const body = active.length
-    ? `<div class="stack">${active.map((s) => cardBlock(s, now)).join('')}</div>
-       <button class="btn btn--ghost" data-act="buy">Купить занятие или абонемент</button>`
-    : `<p class="lead">У тебя пока нет абонемента. Выбери направление:</p>${directionList()}`;
+  const cards = active.length
+    ? `<div class="stack">${active.map((s) => cardBlock(s, now)).join('')}</div>`
+    : `<article class="card card--empty">
+        <div class="card__title">Абонемента сейчас нет</div>
+        <button class="btn" data-act="buy">Выбрать абонемент</button>
+        <p class="card__hint">или купи у админа на занятии</p>
+      </article>`;
   const archivedSubs = past.filter(isSubscription).length;
-  const archiveNote =
+  const historyNote =
     [
       archivedSubs && subsWord(archivedSubs),
       past.length - archivedSubs && singlesWord(past.length - archivedSubs),
@@ -227,16 +281,15 @@ function showHome() {
       .filter(Boolean)
       .join(' · ') || 'пока пусто';
   const menu = `<div class="list menu">
-      ${tile({ act: 'stats', title: 'Статус и статистика', sub: `${status.level.name} · ${lessonsWord(status.lessons)} · ${eventsWord(status.events)}` })}
+      ${tile({ act: 'buy', title: 'Цены и абонементы' })}
       ${tile({ act: 'event', title: 'Я на мероприятии', sub: 'без абонемента, идёт в статус' })}
-      ${tile({ act: 'archive', title: 'Архив', sub: archiveNote })}
+      ${tile({ act: 'archive', title: 'История', sub: historyNote })}
     </div>`;
 
-  render(hello + body + menu, {
+  render(hello + cards + statusBlock(now) + menu, {
     rename: () => showName(),
     buy: () => showDirections(),
-    dir: (id) => showDirection(id, showHome),
-    renew: (id) => showPlans(subs.find((s) => s.id === id).direction, showHome),
+    renew: (id) => renew(id),
     checkin: (id, btn) => checkIn(id, btn),
     invite: () => showInvite(),
     stats: () => showStats(),
@@ -249,46 +302,92 @@ function showHome() {
   flash = null;
 }
 
+const PATH_WORDS = { lessons: lessonsWord, events: eventsWord, subs: subsWord, singles: singlesWord };
+
+// Club status on the home screen: the closest path to the next level in large print, the rest in small print.
+function statusBlock(now) {
+  const st = status;
+  const n = st.next;
+  const yearly = st.level.id !== 'guest';
+  let main = 'Высший статус клуба';
+  let rest = '';
+  if (n) {
+    const word = (p) => PATH_WORDS[p.id](p.left);
+    const [closest, ...others] = [...n.paths].sort((a, b) => (b.total - b.left) / b.total - (a.total - a.left) / a.total);
+    const wait = yearly && n.yearFrom > now ? `год в ${st.level.name} исполнится ${full(n.yearFrom)}` : '';
+    if (closest.left > 0) {
+      main = `До <b>${n.name}</b>: ещё ${word(closest)}${yearly ? ' за год' : ''}`;
+      rest = [`или ${others.map(word).join(', или ')}${yearly ? '' : ', либо взнос 1&nbsp;000&nbsp;₽'}`, wait]
+        .filter(Boolean)
+        .join(' · ');
+    } else {
+      main = `До <b>${n.name}</b>: ${wait}`;
+    }
+  }
+
+  let warn = '';
+  const last = lastActivity();
+  if (yearly && last) {
+    const until = addDays(last, STATUS_IDLE_DAYS);
+    const days = daysBetween(now, until);
+    if (days < 0) warn = `3 месяца без посещений — ${st.level.name} может снизиться`;
+    else if (days <= STATUS_WARN_DAYS) warn = `Приходи до ${short(until)}, чтобы сохранить ${st.level.name}`;
+  }
+
+  return `<h2 class="section">Клубный статус</h2>
+    <button class="status status--tap" data-act="stats">
+      <span class="status__head">
+        <span class="pill pill--${st.level.id}">${st.level.name}</span>
+        ${st.since ? `<span class="hint">с ${full(st.since)}</span>` : ''}
+        <span class="chev">›</span>
+      </span>
+      ${n ? `<span class="bar"><span class="bar__fill" style="width: ${Math.round(n.progress * 100)}%"></span></span>` : ''}
+      <span class="status__main">${main}</span>
+      ${rest ? `<span class="status__rest">${rest}</span>` : ''}
+      ${warn ? `<span class="status__warn">${warn}</span>` : ''}
+    </button>`;
+}
+
 function cardBlock(sub, now) {
   const note = justChecked?.id === sub.id ? '<p class="hint center">Отмечено! Покажи карточку админу</p>' : '';
   if (!isSubscription(sub)) return `<div>${card(sub, now)}${note}</div>`;
 
   const { left, expired } = stateOf(sub, now);
   const source = bonusSource(subs, status.history, now);
-  let action;
+  const buttons = [];
   if (!expired && left > 0) {
-    action = `<button class="btn" data-act="checkin" data-arg="${sub.id}">Я на занятии</button>`;
+    buttons.push(`<button class="btn" data-act="checkin" data-arg="${sub.id}">Я на занятии</button>`);
   } else if (source) {
-    action = `<button class="btn btn--bonus" data-act="checkin" data-arg="${sub.id}">Я на занятии · за бонус 🎁</button>`;
-  } else {
-    action = `<button class="btn" data-act="renew" data-arg="${sub.id}">Купить новый абонемент</button>`;
+    buttons.push(`<button class="btn btn--bonus" data-act="checkin" data-arg="${sub.id}">Я на занятии · 🎁</button>`);
   }
-  // The invite button sits on the card whose bonus goes next.
-  const invite =
-    source?.id === sub.id ? '<button class="btn btn--ghost btn--gift" data-act="invite">Пригласить друга 🎁</button>' : '';
-  const renew =
-    (expired || left <= 0) && source
-      ? `<button class="link link--center" data-act="renew" data-arg="${sub.id}">Купить новый абонемент</button>`
-      : '';
-  return `<div>${card(sub, now)}${note}${action}${invite}${renew}</div>`;
+  if (canRenew(sub, now)) {
+    buttons.push(
+      `<button class="btn${buttons.length ? ' btn--ghost' : ''}" data-act="renew" data-arg="${sub.id}">Продлить</button>`,
+    );
+  }
+  // «подарить другу» sits on the card whose bonus goes next.
+  return `<div>${card(sub, now, { actions: buttons.join(''), invite: source?.id === sub.id })}${note}</div>`;
 }
 
-function card(sub, now) {
-  const { left, expired, active, bonus, bonusAlive: alive } = stateOf(sub, now);
+function card(sub, now, { actions: buttons = '', invite = false } = {}) {
+  const { unlimited, left, expired, active, bonus, bonusAlive: alive } = stateOf(sub, now);
   const once = !isSubscription(sub);
   const fresh = (index) => (justChecked?.id === sub.id && justChecked.index === index ? ' cell--new' : '');
   const off = expired && !once ? ' cell--off' : '';
 
-  const mainCells = Array.from({ length: sub.size }, (_, i) => {
-    const visit = sub.visits[i];
-    if (!visit) return `<div class="cell${off}"><span class="cell__num">${i + 1}</span></div>`;
-    return `<div class="cell cell--done${off}${fresh(i)}">
-        <span class="cell__star">★</span><span class="cell__date">${short(visit)}</span>
-      </div>`;
-  });
+  const mainCells = unlimited
+    ? []
+    : Array.from({ length: sub.size }, (_, i) => {
+        const visit = sub.visits[i];
+        if (!visit) return `<div class="cell${off}"><span class="cell__num">${i + 1}</span></div>`;
+        return `<div class="cell cell--done${off}${fresh(i)}">
+            <span class="cell__star">★</span><span class="cell__date">${short(visit)}</span>
+          </div>`;
+      });
 
-  // Bonus cells go after the main ones; signed with the friend's name, or the direction if it is another one.
+  // Bonus cells go after the main ones. Who or where a bonus went does not fit a small cell — it goes to a note line.
   const bonusVisits = sub.bonusVisits || [];
+  const notes = [];
   const bonusCells = Array.from({ length: Math.max(bonus.total, bonusVisits.length) }, (_, i) => {
     const visit = bonusVisits[i];
     if (!visit) {
@@ -299,46 +398,59 @@ function card(sub, now) {
     let label = '';
     if (visit.friend) label = friendLabel(visit.friend);
     else if (visit.direction !== sub.direction) label = visit.title;
-    return `<div class="cell cell--bonus cell--bonus-done${fresh(sub.size + i)}">
+    if (label) notes.push(`${short(visit.date)} — ${esc(label)}`);
+    return `<div class="cell cell--bonus cell--bonus-done${fresh(mainCells.length + i)}">
         <span class="cell__gift">🎁</span><span class="cell__date">${short(visit.date)}</span>
-        ${label ? `<span class="cell__label">${esc(label)}</span>` : ''}
       </div>`;
   });
 
+  // At most 6 cells in a row, rows of equal length: 4 + 1 bonus — one row of 5, 16 + 2 — three rows of 6.
+  const cells = [...mainCells, ...bonusCells];
+  const rows = Math.ceil(cells.length / 6);
+  const cols = Math.max(4, rows ? Math.ceil(cells.length / rows) : 0);
+
+  const period = active && !expired ? `до ${short(sub.until)}` : `${short(sub.bought)} – ${full(sub.until)}`;
   let meta;
   let foot;
   if (once) {
     meta = `${full(sub.bought)} · ${rub(sub.price)}${sub.method ? ` · ${METHODS[sub.method].name}` : ''}`;
     foot = KIND_NAMES[sub.kind];
+  } else if (unlimited) {
+    meta = `все направления · ${period}`;
+    foot = sub.visits.length ? `${lessonsWord(sub.visits.length)} за срок` : 'занятий пока не было';
+    if (sub.visits.includes(now)) foot += ' · сегодня ★';
   } else {
-    meta = `${lessonsWord(sub.size)} · ${active && !expired ? `до ${short(sub.until)}` : `${short(sub.bought)} – ${full(sub.until)}`}`;
+    meta = `${lessonsWord(sub.size)} · ${period}`;
     foot = left > 0 ? `осталось ${left} из ${sub.size}` : 'все занятия использованы';
     if (expired && left > 0) foot = `срок закончился ${short(sub.until)}, сгорело ${lessonsWord(left)}`;
   }
-  if (sub.pair?.partner) meta += ` · ты и ${esc(sub.pair.partner)}`;
+  const partner = partnerLabel(sub.pair);
+  if (partner) meta += ` · ты и ${esc(partner)}`;
 
   let bonusStatus = '';
-  if (alive) bonusStatus = `🎁 ${bonusWord(bonus.left)} до ${short(bonus.until)}`;
+  if (alive) bonusStatus = `🎁 ${bonusShort(bonus.left)} до ${short(bonus.until)}`;
   else if (bonus.left > 0) bonusStatus = `🎁 ${bonus.left > 1 ? 'бонусы сгорели' : 'бонус сгорел'} ${short(bonus.until)}`;
+  if (invite) bonusStatus += ` · <button class="link link--gift" data-act="invite">подарить другу</button>`;
 
   const tags = [once ? (sub.kind === 'trial' ? 'пробное' : 'разовое') : '', sub.pair ? 'пара' : '']
     .filter(Boolean)
     .map((t) => `<span class="tag">${t}</span>`)
     .join('');
-  const badge = active && sub.payment === 'pending' ? `<div class="badge">${METHODS[sub.method || 'transfer'].badge}</div>` : '';
+  const badge =
+    active && sub.payment === 'pending' ? `<span class="badge">${METHODS[sub.method || 'transfer'].badge}</span>` : '';
 
   return `<article class="card${active ? '' : ' card--past'}">
       <div class="card__head">
         <div>
           <div class="card__title">${esc(sub.title)}${tags}</div>
-          <div class="card__meta">${meta}</div>
+          <div class="card__meta"><span>${meta}</span>${badge}</div>
         </div>
         <img class="card__logo" src="logo.jpg" alt="qlub">
       </div>
-      ${badge}
-      <div class="cells">${[...mainCells, ...bonusCells].join('')}</div>
-      <div class="card__foot">${foot}</div>
-      ${bonusStatus ? `<div class="card__bonus">${bonusStatus}</div>` : ''}
+      ${cells.length ? `<div class="cells" style="--cols: ${cols}">${cells.join('')}</div>` : ''}
+      <div class="card__foot"><span>${foot}</span>${bonusStatus ? `<span class="card__bonus">${bonusStatus}</span>` : ''}</div>
+      ${notes.length ? `<div class="card__notes">🎁 ${notes.join(' · ')}</div>` : ''}
+      ${buttons ? `<div class="card__actions">${buttons}</div>` : ''}
     </article>`;
 }
 
@@ -417,7 +529,7 @@ function showArchive() {
     past.length || events.length
       ? ''
       : '<p class="lead">Пока пусто. Сюда попадут закончившиеся абонементы, прошедшие занятия и мероприятия.</p>';
-  render(`${backLink()}<h1>Архив</h1>${empty}${subsPart}${eventsPart}`);
+  render(`${backLink()}<h1>История</h1>${empty}${subsPart}${eventsPart}`);
 }
 
 function showEvent() {
@@ -545,152 +657,128 @@ function showInvite() {
       return;
     }
     subs = subs.map((s) => (s.id === updated.id ? updated : s));
-    justChecked = { id: updated.id, index: updated.size + updated.bonusVisits.length - 1 };
+    justChecked = { id: updated.id, index: (isUnlimited(updated) ? 0 : updated.size) + updated.bonusVisits.length - 1 };
     flash = `Бонус подарен: ${friendLabel(friend)} · ${dir.name}. Скажи админу, что придёт друг`;
     haptic();
     showHome();
   });
 }
 
-// ---------- buying: direction → single / trial / subscription → for one or a pair → (size) → cash or transfer ----------
+// ---------- buying: prices → direction (subscriptions first) → payment → screenshot to the bot ----------
 
 function directionList() {
   const groups = [...new Set(DIRECTIONS.map((d) => d.group))];
-  return groups
+  const price = (dir) => `${dir.plans.length > 1 ? 'от ' : ''}${rub(Math.min(...dir.plans.map((p) => p.price)))}`;
+  const directions = groups
     .map(
       (group) => `<h2 class="section">${group}</h2>
       <div class="list">${DIRECTIONS.filter((d) => d.group === group)
-        .map((d) => tile({ act: 'dir', arg: d.id, title: d.name, sub: d.note }))
+        .map((d) => tile({ act: 'dir', arg: d.id, title: d.name, sub: d.note, side: price(d) }))
         .join('')}</div>`,
     )
     .join('');
+  const unlimited = `<h2 class="section">${UNLIMITED.name}</h2>
+    <div class="list">${tile({ act: 'dir', arg: UNLIMITED.id, title: UNLIMITED.name, sub: UNLIMITED.note, side: price(UNLIMITED) })}</div>`;
+  return directions + unlimited;
 }
 
 function showDirections() {
   setBack(showHome);
-  render(`${backLink()}<h1>Что купить?</h1>${directionList()}`, {
+  render(`${backLink()}<h1>Цены и абонементы</h1>${directionList()}`, {
     dir: (id) => showDirection(id, showDirections),
   });
 }
 
-function showDirection(dirId, back) {
-  const dir = DIRECTIONS.find((d) => d.id === dirId);
+// A direction: subscriptions right away with the price per lesson; a single (or, for a newcomer, a trial) lesson
+// only as a small link below — the goal is to lead to subscriptions.
+function showDirection(dirId, back, pair = false) {
+  const dir = findDir(dirId);
+  const now = today();
+  recalc(now);
   setBack(back);
-  const again = () => showDirection(dirId, back);
-  const pairNote = (price) => (price.pairPrice ? ` · для пары ${rub(price.pairPrice)}` : '');
+  const again = () => showDirection(dirId, back, pair);
+  const unlimited = dir === UNLIMITED;
+  const options = subscriptionOptions(dir, now);
+  const allowed = pair ? options.pair : options.single;
 
-  const single = tile({
-    act: 'once',
-    arg: 'single',
-    title: 'Разовое занятие',
-    sub: `одно занятие${pairNote(dir.single)}`,
-    side: rub(dir.single.price),
-  });
+  const toggle = dir.plans.some((p) => p.pairPrice)
+    ? `<div class="segmented">
+        <button class="segmented__item${pair ? '' : ' is-on'}" data-act="who" data-arg="one">Один</button>
+        <button class="segmented__item${pair ? ' is-on' : ''}" data-act="who" data-arg="pair">Пара</button>
+      </div>
+      ${pair ? '<p class="hint">Одна карточка на двоих: пришли оба или один — списывается одно занятие</p>' : ''}`
+    : '';
 
-  let trial = '';
-  if (dir.trial) {
-    trial = trialAllowed(dir)
-      ? tile({
-          act: 'once',
-          arg: 'trial',
-          title: 'Пробное занятие',
-          sub: `если ещё не был(а) на ${dir.name}${pairNote(dir.trial)}`,
-          side: rub(dir.trial.price),
-        })
-      : tile({ title: 'Пробное занятие', sub: `только для тех, кто ещё не был на ${dir.name}`, disabled: true });
+  let notice = '';
+  if (!allowed) {
+    const current = `${pair ? 'парный ' : ''}${unlimited ? 'безлимит' : `абонемент на ${dir.name}`}`;
+    const when = unlimited
+      ? ` за ${daysWord(RENEW_DAYS)} до конца`
+      : `, когда в нём останется одно занятие или ${daysWord(RENEW_DAYS)} до конца`;
+    notice = `<p class="notice">У тебя уже есть ${current}. Новый можно купить${when}.</p>`;
   }
 
-  const options = subscriptionOptions(dir, today());
-  const sizes = dir.plans.map((p) => p.size);
-  let subscription;
-  if (!options.single && !options.pair) {
-    subscription = tile({ title: 'Абонемент', sub: 'уже есть — новый, когда закончится текущий', disabled: true });
-  } else {
-    subscription = tile({
-      act: 'plans',
-      title: 'Абонемент',
-      sub: options.single
-        ? sizes.length > 1
-          ? `${sizes.slice(0, -1).join(', ')} или ${lessonsWord(sizes[sizes.length - 1])}`
-          : lessonsWord(sizes[0])
-        : 'свой действует — можно взять парный',
-      side: `от ${rub(options.minPrice)}`,
-    });
+  const plans = dir.plans
+    .filter((p) => !pair || p.pairPrice)
+    .map((p) => {
+      const price = pair ? p.pairPrice : p.price;
+      const days = planDays(dir, p.size);
+      return tile({
+        act: 'plan',
+        arg: p.size ?? '',
+        title: p.size ? lessonsWord(p.size) : daysWord(days),
+        sub: p.size
+          ? `${daysWord(days)} · ${rub(Math.round(price / p.size))} за занятие${pair ? ' на двоих' : ''}`
+          : 'все регулярные занятия, сколько угодно',
+        side: rub(price),
+        disabled: !allowed,
+      });
+    })
+    .join('');
+
+  const perSub = BONUS_BY_LEVEL[status.level.id];
+  const bonus = perSub
+    ? `<p class="bonus-note">🎁 С твоим ${status.level.name} +${bonusWord(perSub)} к абонементу</p>`
+    : '';
+
+  let extra = '';
+  const onceKind = trialAllowed(dir) ? 'trial' : 'single';
+  const once = dir[onceKind];
+  const oncePrice = once && (pair ? once.pairPrice : once.price);
+  if (oncePrice) {
+    extra = `<div class="extra">
+        <button class="link" data-act="once" data-arg="${onceKind}">${onceKind === 'trial' ? 'Пробное занятие' : 'Разовое занятие'}${pair ? ' для пары' : ''} — ${rub(oncePrice)}</button>
+        ${onceKind === 'trial' ? '<p class="hint">Возьмёшь абонемент в тот же день — пробное бесплатно</p>' : ''}
+      </div>`;
   }
 
-  render(`${backLink()}<h1>${dir.name}</h1><p class="lead">${dir.note}</p><div class="list">${single}${trial}${subscription}</div>`, {
-    once: (kind) => showWho(dir, kind, again),
-    plans: () => showPlans(dirId, again),
-  });
-}
-
-// Single and trial lessons: for one or for a pair, when there is a pair price.
-function showWho(dir, kind, back) {
-  const price = dir[kind];
-  const item = (pair) => ({ dir, kind, size: 1, pair, price: pair ? price.pairPrice : price.price });
-  if (!price.pairPrice) {
-    showMethod(item(false), back);
-    return;
-  }
-  setBack(back);
-  const again = () => showWho(dir, kind, back);
   render(
-    `${backLink()}<h1>${dir.name} · ${KIND_NAMES[kind]}</h1>
-    <div class="list">
-      ${tile({ act: 'who', arg: 'one', title: 'Для одного', side: rub(price.price) })}
-      ${tile({ act: 'who', arg: 'pair', title: 'Для пары', sub: 'одна отметка на двоих', side: rub(price.pairPrice) })}
-    </div>`,
-    { who: (who) => showMethod(item(who === 'pair'), again) },
+    `${backLink()}<h1>${dir.name}</h1><p class="lead">${dir.note}</p>${toggle}${notice}<div class="list">${plans}</div>${bonus}${extra}`,
+    {
+      who: (who) => showDirection(dirId, back, who === 'pair'),
+      plan: (size) => {
+        const plan = dir.plans.find((p) => String(p.size ?? '') === size);
+        showPay({ dir, kind: 'subscription', size: plan.size, pair, price: pair ? plan.pairPrice : plan.price }, again);
+      },
+      once: (kind) => showPay({ dir, kind, size: 1, pair, price: pair ? dir[kind].pairPrice : dir[kind].price }, again),
+    },
   );
 }
 
-function showPlans(dirId, back) {
-  const dir = DIRECTIONS.find((d) => d.id === dirId);
-  const options = subscriptionOptions(dir, today());
-  setBack(back);
-  const again = () => showPlans(dirId, back);
-
-  const tiles = (pair) =>
-    dir.plans
-      .filter((p) => !pair || p.pairPrice)
-      .map((p) => {
-        const price = pair ? p.pairPrice : p.price;
-        return tile({
-          act: pair ? 'pairPlan' : 'plan',
-          arg: p.size,
-          title: lessonsWord(p.size),
-          sub: `${daysWord(DAYS_BY_SIZE[p.size])} · ${rub(Math.round(price / p.size))} за занятие`,
-          side: rub(price),
-        });
-      })
-      .join('');
-
-  let body = '';
-  if (!options.single && !options.pair) {
-    body = `<p class="lead">У тебя уже есть абонемент на ${dir.name}. Новый можно купить, когда в нём кончатся занятия или выйдет срок.</p>`;
-  } else {
-    if (!options.single) {
-      body += `<p class="notice">У тебя уже есть абонемент на ${dir.name} — второй такой же не нужен. Можно взять парный.</p>`;
-    }
-    if (options.single) body += `${options.pair ? '<h2 class="section">Для одного</h2>' : ''}<div class="list">${tiles(false)}</div>`;
-    if (options.pair) body += `<h2 class="section">Для пары · одна карточка на двоих</h2><div class="list">${tiles(true)}</div>`;
-  }
-
-  const open = (size, pair) => {
-    const plan = dir.plans.find((p) => p.size === Number(size));
-    showMethod({ dir, kind: 'subscription', size: plan.size, pair, price: pair ? plan.pairPrice : plan.price }, again);
-  };
-  render(`${backLink()}<h1>${dir.name} · абонемент</h1><p class="lead">${dir.note}</p>${body}`, {
-    plan: (size) => open(size, false),
-    pairPlan: (size) => open(size, true),
-  });
+// «Продлить»: straight to payment for the same subscription, with a link to pick another one.
+function renew(id) {
+  const sub = subs.find((s) => s.id === id);
+  const item = renewItem(sub);
+  if (item) showPay(item, showHome, { partnerNick: sub.pair?.nick || '', change: true });
+  else showDirection(sub.direction, showHome, !!sub.pair);
 }
 
 function summary(item, now) {
   let details = 'на сегодняшнее занятие';
   let bonusNote = '';
   if (item.kind === 'subscription') {
-    details = `${daysWord(DAYS_BY_SIZE[item.size])}, до ${short(addDays(now, DAYS_BY_SIZE[item.size]))}`;
+    const days = planDays(item.dir, item.size);
+    details = `${daysWord(days)}, до ${short(addDays(now, days))}`;
     const perSub = BONUS_BY_LEVEL[status.level.id];
     if (perSub) {
       bonusNote = `<div class="summary__bonus"><span class="gift-chip">🎁 +${bonusWord(perSub)}</span> — у тебя ${status.level.name}</div>`;
@@ -704,57 +792,52 @@ function summary(item, now) {
     </div>`;
 }
 
-function showMethod(item, back) {
-  setBack(back);
-  const now = today();
-  recalc(now);
-  const again = () => showMethod(item, back);
-  render(
-    `${backLink()}<h1>Как оплатишь?</h1>
-    ${summary(item, now)}
-    <div class="list">
-      ${tile({ act: 'method', arg: 'transfer', title: 'Переводом', sub: 'по номеру телефона, потом «Оплатил(а)»' })}
-      ${tile({ act: 'method', arg: 'cash', title: 'Наличными', sub: 'отдашь админу на занятии' })}
-    </div>`,
-    { method: (method) => showPay(item, method, again) },
-  );
-}
-
-function showPay(item, method, back) {
+function showPay(item, back, { partnerNick = '', change = false } = {}) {
   setBack(back);
   const now = today();
   recalc(now);
   const partner = item.pair
     ? `<label class="field">
-        <span class="field__label">Кто второй в паре</span>
-        <input class="input input--left" id="partner" maxlength="40" placeholder="Имя или @ник" autocomplete="off">
+        <span class="field__label">Ник второго в Telegram — по нему второй увидит карточку у себя</span>
+        <input class="input input--left" id="partner" maxlength="33" placeholder="@nick" autocapitalize="off" autocomplete="off" value="${partnerNick ? `@${esc(partnerNick)}` : ''}">
       </label>`
     : '';
-  let how;
-  let button;
-  if (method === 'cash') {
-    how = `<p>Отдай <b>${rub(item.price)}</b> админу на занятии. Покупка появится сразу, админ отметит оплату.</p>`;
-    button = 'Оплачу наличными';
-  } else {
-    how = PAY_PHONE
-      ? `<p>Переведи <b>${rub(item.price)}</b> по номеру:</p>
-         <div class="copy"><span class="copy__value">${esc(PAY_PHONE)}</span><button class="link" data-act="copy">Скопировать</button></div>
-         ${PAY_RECIPIENT ? `<p class="hint">${esc(PAY_RECIPIENT)}</p>` : ''}`
-      : '<p>Номер для перевода подскажет админ клуба.</p>';
-    how += '<p class="hint">После перевода нажми «Оплатил(а)» — покупка сразу появится, а админ проверит оплату.</p>';
-    button = 'Оплатил(а)';
-  }
+  const how = PAY_PHONE
+    ? `<p>Переведи <b>${rub(item.price)}</b> по номеру:</p>
+       <div class="copy"><span class="copy__value">${esc(PAY_PHONE)}</span><button class="link" data-act="copy">Скопировать</button></div>
+       ${PAY_RECIPIENT ? `<p class="hint">${esc(PAY_RECIPIENT)}</p>` : ''}`
+    : '<p>Номер для перевода подскажет админ клуба.</p>';
 
   render(
-    `${backLink()}<h1>${method === 'cash' ? 'Наличными' : 'Переводом'}</h1>
+    `${backLink()}<h1>Оплата</h1>
     ${summary(item, now)}
+    ${change ? '<button class="link" data-act="change">выбрать другой абонемент</button>' : ''}
     ${partner}
+    <p class="error" id="pay-error" hidden></p>
     ${how}
-    <button class="btn" data-act="paid">${button}</button>`,
+    <p class="hint">После перевода нажми «Я перевёл(а)» и отправь скриншот в чат с ботом — бот передаст его админу.</p>
+    <button class="btn" data-act="paid" data-arg="transfer">Я перевёл(а)</button>
+    <button class="link link--center" data-act="paid" data-arg="cash">Наличными — отдам админу</button>`,
     {
-      paid: (_, btn) => buy(item, method, btn),
+      paid: (method, btn) => buy(item, method, btn),
       copy: (_, el) => copyText(PAY_PHONE, el),
+      change: () => showDirection(item.dir.id, back, item.pair),
     },
+  );
+}
+
+function showScreenshot() {
+  setBack(showHome);
+  render(
+    `${backLink()}
+    <section class="welcome">
+      <div class="big-icon">📸</div>
+      <h1>Остался шаг — скриншот</h1>
+      <p class="lead">Отправь скриншот перевода в чат с ботом — бот передаст его админу. Покупка уже в карточке.</p>
+      <button class="btn" data-act="chat">Открыть чат с ботом</button>
+      <button class="link link--center" data-act="home">На главную</button>
+    </section>`,
+    { chat: () => openBotChat(), home: () => showHome() },
   );
 }
 
@@ -762,22 +845,36 @@ function showPay(item, method, back) {
 
 async function buy(item, method, btn) {
   const now = today();
+  recalc(now);
   // The screen may have stayed open while something else was bought.
   if (item.kind === 'subscription') {
     const options = subscriptionOptions(item.dir, now);
     if (!(item.pair ? options.pair : options.single)) {
-      alertDialog(`У тебя уже есть такой абонемент на ${item.dir.name}.`);
+      alertDialog('У тебя уже есть такой абонемент — новый можно купить, когда он будет заканчиваться.');
       showHome();
       return;
     }
   }
   if (item.kind === 'trial' && !trialAllowed(item.dir)) {
-    alertDialog(`Пробное — только для тех, кто ещё не был на ${item.dir.name}.`);
+    alertDialog('Пробное — только для тех, кто ещё не был в клубе.');
     showHome();
     return;
   }
 
-  const partner = item.pair ? document.getElementById('partner').value.trim() : '';
+  let nick = '';
+  if (item.pair) {
+    const input = document.getElementById('partner');
+    const error = document.getElementById('pay-error');
+    nick = input.value.trim().replace(/^@+/, '');
+    if (!TELEGRAM_NICK.test(nick)) {
+      error.textContent = nick ? 'Ник в Telegram — латиница, цифры и _, от 4 символов' : 'Укажи ник второго в Telegram';
+      error.hidden = false;
+      input.focus();
+      return;
+    }
+    error.hidden = true;
+  }
+
   const label = btn.textContent;
   btn.disabled = true;
   if (!(await confirmDialog(`Купить ${itemName(item)} за ${rub(item.price)} (${METHODS[method].name})?`))) {
@@ -793,11 +890,11 @@ async function buy(item, method, btn) {
     title: item.dir.name,
     size: item.size,
     price: item.price,
-    pair: item.pair ? { partner } : null,
+    pair: item.pair ? { nick } : null,
     method,
     bought: now,
     // A single or trial lesson is today's lesson: the star is set right away.
-    until: once ? now : addDays(now, DAYS_BY_SIZE[item.size]),
+    until: once ? now : addDays(now, planDays(item.dir, item.size)),
     payment: 'pending',
     visits: once ? [now] : [],
     bonusVisits: [],
@@ -814,7 +911,12 @@ async function buy(item, method, btn) {
   subs = [record, ...subs];
   if (once) justChecked = { id: record.id, index: 0 };
   haptic();
-  showHome();
+  if (method === 'transfer') {
+    showScreenshot();
+  } else {
+    flash = `Отдай ${rub(item.price)} админу на занятии`;
+    showHome();
+  }
 }
 
 // A lesson from the card's own subscription while it has lessons; otherwise a bonus lesson,
@@ -862,7 +964,9 @@ async function checkIn(id, btn) {
   subs = subs.map((s) => (s.id === updated.id ? updated : s));
   justChecked = {
     id: updated.id,
-    index: byBonus ? updated.size + updated.bonusVisits.length - 1 : updated.visits.lastIndexOf(now),
+    index: byBonus
+      ? (isUnlimited(updated) ? 0 : updated.size) + updated.bonusVisits.length - 1
+      : updated.visits.lastIndexOf(now),
   };
   haptic();
   showHome();

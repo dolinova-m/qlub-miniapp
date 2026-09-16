@@ -87,7 +87,6 @@ button {
 .btn:disabled { opacity: 0.5; }
 .btn--ghost { background: var(--surface); color: var(--text); margin-top: 20px; }
 .btn--bonus { background: linear-gradient(135deg, #ff8cc0, #ffc39e); }
-.btn--gift { margin-top: 12px; box-shadow: inset 0 0 0 1.5px rgba(255, 126, 182, 0.55); }
 .link--center { display: block; margin: 14px auto 0; }
 
 .flash { margin: 0 0 16px; font-weight: 600; }
@@ -107,7 +106,7 @@ button {
 .field { display: block; margin-top: 12px; }
 .field__label { display: block; margin: 0 0 6px 4px; font-size: 13px; color: var(--hint); }
 .field__or { margin: 12px 0 0; font-size: 13px; text-align: center; color: var(--hint); }
-.input--left { text-align: left; }
+.input.input--left { text-align: left; }
 select.input { font-size: 16px; }
 
 .gift-chip {
@@ -182,9 +181,9 @@ select.input { font-size: 16px; }
 }
 .hello h1 { margin: 0; }
 
-.stack { display: grid; gap: 24px; }
+.stack { display: grid; gap: 12px; }
 
-.menu { margin-top: 24px; }
+.menu { margin-top: 16px; }
 .chev { flex: none; font-size: 24px; line-height: 1; color: var(--hint); }
 
 /* ---------- club status ---------- */
@@ -201,6 +200,22 @@ select.input { font-size: 16px; }
 .status__next { margin: 6px 0 0; font-size: 14px; color: var(--hint); }
 .status__next b { color: var(--text); }
 .summary__bonus { margin-top: 10px; font-size: 14px; }
+
+/* The status block on the home screen is one big tap target. */
+.status--tap {
+  display: block;
+  width: 100%;
+  border: 0;
+  text-align: left;
+}
+.status--tap:active { opacity: 0.7; }
+.status--tap > span, .status--tap .bar__fill { display: block; }
+.status--tap > .status__head { display: flex; }
+.status--tap .chev { margin-left: auto; }
+.status__main { margin-top: 10px; font-weight: 600; }
+.status__main b { font-weight: 700; }
+.status__rest { margin-top: 2px; font-size: 13px; color: var(--hint); }
+.status__warn { margin-top: 8px; font-size: 14px; font-weight: 600; color: #d9480f; }
 
 .bar {
   height: 6px;
@@ -245,13 +260,14 @@ select.input { font-size: 16px; }
 
 /* ---------- subscription card ---------- */
 
+/* Compact: a 4-lesson card with a bonus is about 210 px tall with its button. */
 .card {
-  padding: 16px;
+  padding: 14px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
+  border-radius: 18px;
   background: #0a0a0a;
   color: #fff;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
 
 .card__head {
@@ -259,9 +275,9 @@ select.input { font-size: 16px; }
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 10px;
 }
-.card__title { font-size: 20px; font-weight: 700; overflow-wrap: anywhere; }
+.card__title { font-size: 18px; line-height: 1.25; font-weight: 700; overflow-wrap: anywhere; }
 .tag {
   display: inline-block;
   margin-left: 8px;
@@ -274,65 +290,79 @@ select.input { font-size: 16px; }
   text-transform: uppercase;
   vertical-align: middle;
 }
-.card__meta { margin-top: 2px; font-size: 14px; color: rgba(255, 255, 255, 0.6); }
-.card__logo { width: 56px; flex: none; mix-blend-mode: lighten; }
-.card__foot { margin-top: 12px; font-size: 14px; color: rgba(255, 255, 255, 0.6); }
+.card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 2px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.card__logo { width: 44px; flex: none; mix-blend-mode: lighten; }
+.card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.card__bonus { color: #ff9cc7; }
+.card__notes { margin-top: 4px; font-size: 12px; color: rgba(255, 255, 255, 0.45); }
+.card__hint { margin: 8px 0 0; font-size: 13px; text-align: center; color: rgba(255, 255, 255, 0.55); }
+
+.card__actions { display: flex; gap: 8px; margin-top: 12px; }
+.card__actions .btn { flex: 1; margin: 0; padding: 10px 12px; border-radius: 12px; font-size: 15px; }
+.card__actions .btn--ghost { background: rgba(255, 255, 255, 0.12); color: #fff; }
 
 .card--past { filter: grayscale(1); opacity: 0.65; box-shadow: none; }
+.card--empty .card__title { text-align: center; }
+.card--empty .btn { margin-top: 12px; }
 
 .badge {
-  display: inline-block;
-  margin: -4px 0 12px;
-  padding: 3px 10px;
+  padding: 1px 8px;
   border-radius: 999px;
   background: rgba(255, 196, 0, 0.14);
   color: #ffd466;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
+/* Main and bonus cells in one grid; --cols is set by the card: at most 6 in a row, rows of equal length. */
 .cells {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr));
+  gap: 6px;
 }
 
 .cell {
-  aspect-ratio: 1 / 1;
+  height: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   border: 1.5px dashed rgba(255, 255, 255, 0.22);
-  border-radius: 12px;
+  border-radius: 10px;
 }
-.cell__num { font-size: 13px; color: rgba(255, 255, 255, 0.28); }
+.cell__num { font-size: 12px; color: rgba(255, 255, 255, 0.28); }
 
 .cell--done { border: 1.5px solid rgba(49, 223, 255, 0.9); background: rgba(49, 223, 255, 0.1); }
-.cell__star { font-size: 22px; line-height: 1; color: var(--mint); }
-.cell__date { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.cell__star { font-size: 13px; line-height: 1; color: var(--mint); }
+.cell__date { margin-top: 2px; font-size: 11px; line-height: 1.1; font-variant-numeric: tabular-nums; }
 
 .cell--new { animation: pop 0.5s cubic-bezier(0.2, 0.8, 0.3, 1.4), glow 1.4s ease-out 0.2s 3; }
 
 /* Bonus lessons — pink cells with a gift. */
 .cell--bonus { border-color: rgba(255, 126, 182, 0.6); background: rgba(255, 126, 182, 0.08); }
-.cell--bonus .cell__num { margin-top: 4px; font-size: 11px; color: rgba(255, 150, 196, 0.85); }
-.cell__gift { font-size: 20px; line-height: 1; opacity: 0.6; }
+.cell--bonus .cell__num { margin-top: 1px; font-size: 10px; line-height: 1.1; color: rgba(255, 150, 196, 0.85); }
+.cell__gift { font-size: 14px; line-height: 1; opacity: 0.6; }
 .cell--bonus-done { border-style: solid; border-color: var(--gift); background: rgba(255, 126, 182, 0.2); }
 .cell--bonus-done .cell__gift { opacity: 1; }
-.cell__label {
-  max-width: 100%;
-  margin-top: 2px;
-  padding: 0 4px;
-  overflow: hidden;
-  font-size: 10px;
-  color: rgba(255, 255, 255, 0.75);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .cell--off { filter: grayscale(1); opacity: 0.35; }
 
-.card__bonus { margin-top: 4px; font-size: 14px; color: #ff9cc7; }
+.link--gift { font-size: 13px; color: #ff9cc7; }
 
 /* ---------- buying ---------- */
 
@@ -376,6 +406,32 @@ select.input { font-size: 16px; }
   background: var(--surface);
 }
 .copy__value { font-size: 18px; font-weight: 600; }
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 4px 0 12px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--surface);
+}
+.segmented__item {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--hint);
+}
+.segmented__item.is-on { background: var(--bg); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12); }
+
+.segmented + .hint { margin: -4px 0 12px; }
+.bonus-note { margin: 12px 0 0; font-size: 14px; }
+.extra { margin-top: 20px; text-align: center; }
+.extra .hint { margin: 4px 0 0; font-size: 13px; }
+.big-icon { font-size: 56px; line-height: 1; margin-bottom: 16px; }
 
 .ver { margin-top: 32px; font-size: 11px; text-align: center; color: var(--hint); opacity: 0.6; }
 

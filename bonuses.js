@@ -1,5 +1,5 @@
-import { addDays } from './dates.js?v=4';
-import { isSubscription, levelOn } from './status.js?v=4';
+import { addDays } from './dates.js?v=5';
+import { isSubscription, levelOn } from './status.js?v=5';
 
 // Bonus lessons — «Клубная система.md»: added to every purchased subscription (not to single or trial lessons)
 // by the status on the purchase day, valid 90 days, not tied to a direction, spent oldest first.

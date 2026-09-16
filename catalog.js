@@ -78,9 +78,23 @@ export const DIRECTIONS = [
   },
 ];
 
+// Unlimited — every direction for 30 days («Цены Москва.pdf»). Stored as a subscription on the `unlimited`
+// direction with no size: no cells, lessons are not counted down.
+export const UNLIMITED = {
+  id: 'unlimited',
+  name: 'Безлимит',
+  note: 'все направления · 30 дней',
+  days: 30,
+  plans: [{ size: null, price: 14000, pairPrice: 24000 }],
+};
+
 // How many days a subscription is valid, by number of lessons.
 export const DAYS_BY_SIZE = { 4: 30, 8: 30, 12: 45, 16: 60 };
 
 // Bank transfer details. Empty phone — the payment screen says the admin will give the number.
 export const PAY_PHONE = '';
 export const PAY_RECIPIENT = '';
+
+// The club bot's username without @ — «Открыть чат с ботом» after a transfer, to send the screenshot.
+// Empty — the button closes the mini app, which returns to the chat it was opened from.
+export const BOT_USERNAME = '';
