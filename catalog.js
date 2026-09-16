@@ -95,6 +95,6 @@ export const DAYS_BY_SIZE = { 4: 30, 8: 30, 12: 45, 16: 60 };
 export const PAY_PHONE = '';
 export const PAY_RECIPIENT = '';
 
-// The club bot's username without @ — «Открыть чат с ботом» after a transfer, to send the screenshot.
-// Empty — the button closes the mini app, which returns to the chat it was opened from.
+// Optional: the username (without @) of the bot this mini app belongs to — «Перейти в чат с ботом» after a transfer.
+// Empty — the button closes the mini app, which returns to the bot chat it was opened from.
 export const BOT_USERNAME = '';

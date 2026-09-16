@@ -151,7 +151,8 @@ function haptic() {
   if (supports('6.1')) tg.HapticFeedback.notificationOccurred('success');
 }
 
-// The screenshot of a transfer goes to the bot chat; the bot forwards it to the admins.
+// The screenshot of a transfer goes to the chat with the mini app's own bot; the bot forwards it to the admins.
+// Closing the mini app lands in that chat; BOT_USERNAME also covers a launch from a link in another chat.
 function openBotChat() {
   if (BOT_USERNAME && supports('6.1')) tg.openTelegramLink(`https://t.me/${BOT_USERNAME}`);
   else if (BOT_USERNAME) window.open(`https://t.me/${BOT_USERNAME}`, '_blank');
@@ -833,8 +834,8 @@ function showScreenshot() {
     <section class="welcome">
       <div class="big-icon">📸</div>
       <h1>Остался шаг — скриншот</h1>
-      <p class="lead">Отправь скриншот перевода в чат с ботом — бот передаст его админу. Покупка уже в карточке.</p>
-      <button class="btn" data-act="chat">Открыть чат с ботом</button>
+      <p class="lead">Нажми кнопку и отправь скриншот перевода в чат с ботом qlub — бот передаст его админу. Покупка уже в карточке.</p>
+      <button class="btn" data-act="chat">Перейти в чат с ботом</button>
       <button class="link link--center" data-act="home">На главную</button>
     </section>`,
     { chat: () => openBotChat(), home: () => showHome() },
